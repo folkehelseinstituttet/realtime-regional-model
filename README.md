@@ -37,6 +37,7 @@ R17.txt: Calibration file of the presplit step.
 
 
 ## Code for hospitalisation parameters
+survival_analysis_season_and_place.Rmd has been run within a safe environment where the data on individual level is saved, these data is not public available. The result from running this file can be found in survival_analysis_season_and_place.docx.
 
 ## Code for validation of forecasts
 The paper_evaluations.R file expects to receive the latest data and results from various calibrations at different time-points and then calculates CRPS and Energy scores and coverage of different prediction intervals. 
