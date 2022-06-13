@@ -1,0 +1,271 @@
+---
+title: "Survival analysis to calculate length of stay, season and place"
+author: "Anja Bråthen Kristoffersen"
+date: "22 April 2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r echo = F, warning = FALSE, message=FALSE}
+fig_path <- "G:/Helseregistre/BeredtC19/TeamModellering/R-script/Artikkel/Figurer/"
+data_path <- "G:/Helseregistre/BeredtC19/TeamModellering/TilFHI01/"
+script_path <- "G:/Helseregistre/BeredtC19/TeamModellering/R-script/Artikkel"
+
+library(data.table)
+library(ggplot2)
+library(ggpubr)
+library(survival)
+library(survminer)
+
+source(fs::path(script_path, "read_data.R"))
+
+```
+
+
+
+```{r echo = F}
+
+
+
+result_table <- as.data.frame(matrix(NA, ncol = 3 * length(levels(dNoPaR$season_place)), nrow = 6))
+rownames(result_table) <- c("symptom_to_hospitalization",   "hospitalization_to_discharge_not_ICU", "hospitalization_to_ICU",    "time_in_ICU",  "ICU_to_discharge_from_hospital", "propotion_ICU")
+colnames(result_table) <-  c(paste0(levels(dNoPaR$season_place)[1], c(".mu", ".size", ".N")),
+                              paste0(levels(dNoPaR$season_place)[2], c(".mu", ".size", ".N")),
+                              paste0(levels(dNoPaR$season_place)[3], c(".mu", ".size", ".N")),
+                              paste0(levels(dNoPaR$season_place)[4], c(".mu", ".size", ".N")),
+                              paste0(levels(dNoPaR$season_place)[5], c(".mu", ".size", ".N")),
+                              paste0(levels(dNoPaR$season_place)[6], c(".mu", ".size", ".N")))
+ 
+
+
+f.nbinom <- function(par, x, y){
+  size <- par[1]
+  mu <- par[2]
+  error <- sum((y - (1-pnbinom(x, size = size, mu = mu)))^2)
+  return(error)
+}
+
+
+```
+
+
+
+
+```{r, echo = FALSE}
+
+```
+
+
+
+
+
+```{r, echo = F}
+length_of_stay_univar <- function(time_LoS, event_LoS, explantory_variable, levels, title, xlimDens, ylimDens){
+  #browser()
+  data <- data.frame(time_LoS = time_LoS, event_LoS = event_LoS, v = explantory_variable)
+  data <- data[!is.na(data$time_LoS),]
+  data$v <- factor(data$v, levels = levels)
+  cox.ph <- coxph(Surv(time = time_LoS, event = event_LoS) ~ v, data = data)
+
+
+  survD <- survdiff(Surv(time = time_LoS, event = event_LoS) ~ v, data = data)
+  survDp <- 1 - pchisq(survD$chisq, length(survD$n) -1)
+
+  surv.fit <- survfit(Surv(time = time_LoS, event = event_LoS) ~ v, data = data)
+  gg <- ggsurvplot(surv.fit, data = data, xlab = title)
+  posible_levels <- levels(data$v)
+  mat <- matrix(NA, ncol = 3, nrow = length(posible_levels))
+  colnames(mat) <- c("mu", "size", "N")
+  rownames(mat) <- posible_levels
+
+  n <- length(summary(surv.fit)[["time"]])
+  newStart <- which(summary(surv.fit)[[2]][2:n] - summary(surv.fit)[[2]][1:(n-1)] < 0 )
+  newStart <- c(0, newStart, n)
+  plist <- list()
+  for(i in 1:(length(newStart)-1)){
+    x <- summary(surv.fit)[["time"]][(newStart[i]+1):newStart[i+1]]
+    y <- summary(surv.fit)[["surv"]][(newStart[i]+1):newStart[i+1]]
+
+    optnbinom <- optim(c(1, 1), f.nbinom, x = x, y = y)
+
+    mat[i, 2] <- round(optnbinom$par[1], 3)
+    mat[i, 1] <- round(optnbinom$par[2], 3)
+
+    d2 <- data[data$v == posible_levels[i], ]
+    mat[i,3] <- nrow(d2)
+    x2 <- 0:round(max(d2$time_LoS, na.rm = T))
+    y2 <- dnbinom(x = x2, mu = mat[i,1], size = mat[i,2])
+    df2 <- with(d2, data.frame(x = x2, y = y2))
+
+    
+    p <- ggplot(data = d2, aes(x = time_LoS, y = ..density..)) +
+      geom_histogram(binwidth = 1)
+    p <- p + xlab("days") #+ xlim(0,40) + ylim(0,0.1)
+    p <- p + geom_line(data = df2, aes(x = x, y = y, status = "fitted distribution"), color = "red")
+    p <- p + ggtitle(gsub("_", " ", posible_levels[i]))
+    p <- p + xlim(xlimDens) + ylim(ylimDens)
+    p <- p + geom_text(label = paste0("mu = ", round(mat[i,1],1), "\n size = ", round(mat[i,2],1), "\n N = ", mat[i,3]), aes(x = Inf, y = Inf, vjust = 1, hjust = 1), size = 7 )
+    p <- p + theme(plot.title = element_text( size = 20))
+    plist[[i]] <- p
+  }
+
+
+  return(list(survDp = survDp, mat = mat, surv.fit = surv.fit, gg = gg, dens_list = plist)) # data = data
+ }
+
+```
+
+
+
+
+
+
+
+# Symptom start to hospitalization
+
+```{r, echo = FALSE, warning=F, fig.width= 14, fig.height=7}
+
+p <- length_of_stay_univar(time_LoS = dNoPaR$symptom_start_to_hospital, event_LoS = 1, explantory_variable = dNoPaR$season_place, levels = levels(dNoPaR$season_place), title = "Time from symptom start to hospitalization", xlimDens = c(0,30), ylimDens = c(0, 0.2))
+
+
+p$mat
+
+p$gg
+
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], p$dens_list[[5]], p$dens_list[[6]], ncol = 2, nrow = 3)
+
+
+
+png(fs::path(fig_path, "symptom_to_hospitalization.png"), height = 1050, width = 960)
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], p$dens_list[[5]], p$dens_list[[6]], ncol = 2, nrow = 3)
+dev.off()
+
+result_table["symptom_to_hospitalization",] <- as.vector(t(p$mat))
+```
+
+
+# admittion to discharge, not ICU
+
+
+```{r, echo = FALSE, warning=F, fig.width= 14, fig.height=7}
+d <- dNoPaR[!dNoPaR$Resp == T,]
+p <- length_of_stay_univar(time_LoS = d$LoS, event_LoS = !d$hospitalized_today, explantory_variable = d$season_place, levels = levels(dNoPaR$season_place), title = "LoS from admittion to discharge, not ICU", xlimDens = c(0,30), ylimDens = c(0, 0.2))
+
+
+p$mat
+
+p$gg
+
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], p$dens_list[[5]], p$dens_list[[6]], ncol = 2, nrow = 3)
+
+
+
+png(fs::path(fig_path, "hospitalization_to_discharge_not_ICU.png"), height = 1050, width = 960)
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], p$dens_list[[5]], p$dens_list[[6]], ncol = 2, nrow = 3)
+dev.off()
+
+result_table["hospitalization_to_discharge_not_ICU",] <- as.vector(t(p$mat))
+
+```
+
+
+
+# admittion hospital to ICU
+
+
+```{r, echo = FALSE, warning=F, fig.width= 14, fig.height=7}
+d <- dNIR[dNIR$Resp == T,]
+p <- length_of_stay_univar(time_LoS = d$LoS_hosp_to_ICU, event_LoS = 1, explantory_variable = d$season_place, levels = levels(dNIR$season_place), title = "hospitalization_to_ICU", xlimDens = c(0,15), ylimDens = c(0, 0.25))
+
+
+p$mat
+
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], ncol = 2, nrow = 2)
+
+png(fs::path(fig_path, "hospitalization_to_ICU.png"), height = 700, width = 960)
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], ncol = 2, nrow = 2)
+dev.off()
+
+result_table["hospitalization_to_ICU",] <- c(as.vector(t(p$mat)), rep(NA, 6))
+
+```
+
+
+# time in ICU
+
+```{r, echo = FALSE, warning=F, fig.width= 14, fig.height=7}
+d <- dNIR[dNIR$Resp == T, ]
+p <- length_of_stay_univar(time_LoS = d$LoS_ICU, event_LoS = !d$ICU_today, explantory_variable = d$season_place, levels = levels(dNIR$season_place), title = "time in ICU", xlimDens = c(0,45), ylimDens = c(0, 0.10))
+
+
+p$mat
+
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], ncol = 2, nrow = 2)
+
+png(fs::path(fig_path, "time_in_ICU.png"), height = 700, width = 960)
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], ncol = 2, nrow = 2)
+dev.off()
+
+result_table["time_in_ICU",] <- c(as.vector(t(p$mat)), rep(NA, 6))
+```
+
+
+
+# LoS after ICU
+
+```{r, echo = FALSE, warning=F, fig.width= 14, fig.height=7}
+d <- dNIR
+p <- length_of_stay_univar(time_LoS = d$ICU_to_discharge_from_hospital, event_LoS = !d$hospitalized_today, explantory_variable = d$season_place, levels = levels(dNIR$season_place), title = "LoS after ICU", xlimDens = c(0,45), ylimDens = c(0, 0.10))
+
+
+p$mat
+
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], ncol = 2, nrow = 2)
+
+png(fs::path(fig_path, "ICU_to_discharge_from_hospital.png"), height = 700, width = 960)
+ggarrange(p$dens_list[[1]], p$dens_list[[2]], p$dens_list[[3]], p$dens_list[[4]], ncol = 2, nrow = 2)
+dev.off()
+
+result_table["ICU_to_discharge_from_hospital",] <- c(as.vector(t(p$mat)), rep(NA, 6))
+```
+
+
+
+# Propotion hospitalized that need ICU treatment
+
+
+
+```{r, echo = F}
+
+mat <- as.data.frame(cbind(
+table(dNoPaR$Resp, dNoPaR$season3_place)["TRUE",],
+table(dNoPaR$season3_place)
+))
+
+
+colnames(mat) <- c("ICU", "hospitalized")
+
+mat$proportion_ICU <- round(mat$ICU/mat$hospitalized,3)
+
+mat
+
+
+result_table["propotion_ICU" ,] <- c(mat[1,3], NA, NA, mat[2,3], NA, NA, mat[3,3], NA, NA, mat[4,3], NA, NA, NA, NA, NA, NA, NA, NA)
+```
+
+
+
+
+```{r, echo = F}
+write.csv2(result_table, fs::path(fig_path, "LoS.csv"))
+
+```
+
+
+
